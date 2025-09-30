@@ -92,7 +92,7 @@ term.focus();
 const noteColumn = document.getElementById('note-column');
 
 // koneksi WebSocket ke backend (route updated)
-const ws = new WebSocket(`ws://localhost:8080/session/${sessionId}/ws/subscriber`);
+const ws = new WebSocket(`wss://${window.location.host}/session/${sessionId}/ws/subscriber`);
 
 // Send PING every 100 seconds to keep connection alive
 let pingInterval = null;
