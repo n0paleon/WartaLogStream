@@ -42,7 +42,7 @@ function setStatus(status) {
         statusIndicator.classList.add("status-running");
         statusDot.classList.remove("status-stopped");
         statusDot.classList.add("status-running");
-        // Resume session age updates if creation time exists and session not stopped
+        // resume session age updates if creation time exists and session not stopped
         if (sessionCreationTime && !sessionStopTime && !ageInterval) {
             ageInterval = setInterval(updateSessionAge, 1000);
         }
@@ -60,7 +60,7 @@ function setStatus(status) {
     }
 }
 
-// Initial status
+// initial status
 setStatus("Stopped");
 
 if (!sessionId) {
@@ -91,14 +91,12 @@ term.focus();
 
 const noteColumn = document.getElementById('note-column');
 
-// koneksi WebSocket ke backend (route updated)
-const ws = new WebSocket(`ws://localhost:3000/session/${sessionId}/ws/subscriber`);
+const ws = new WebSocket(`wss://${window.location.host}/session/${sessionId}/ws/subscriber`);
 
-// terima event log / note / status / session_creation_time / session_stop_time
+// event log / note / status / session_creation_time / session_stop_time
 ws.addEventListener('message', (evt) => {
     const data = JSON.parse(evt.data);
 
-    // Handle session creation time
     if (data.type === "session_creation_time") {
         sessionCreationTime = Number(data.data);
         sessionStopTime = null;
@@ -109,21 +107,18 @@ ws.addEventListener('message', (evt) => {
         return;
     }
 
-    // Handle session stop time
     if (data.type === "session_stop_time") {
         sessionStopTime = Number(data.data);
         if (ageInterval) {
             clearInterval(ageInterval);
             ageInterval = null;
         }
-        // Display the final duration
         if (sessionCreationTime) {
             sessionAgeValue.textContent = formatDuration(sessionStopTime - sessionCreationTime);
         }
         return;
     }
 
-    // Handle status event
     if (data.type === "status") {
         setStatus(data.data);
         if (data.data === "Stopped") {
@@ -132,7 +127,6 @@ ws.addEventListener('message', (evt) => {
         return;
     }
 
-    // Handle invalid session id error
     if (data.message === "invalid session id") {
         errorMessageDiv.innerHTML = `
             <div class="alert alert-danger text-center" role="alert" style="border-radius:12px;">

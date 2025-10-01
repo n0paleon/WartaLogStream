@@ -25,7 +25,6 @@ const (
 	ActionPushLog      WSAction = "push_log"
 	ActionSetNote      WSAction = "set_note"
 	ActionPushFinished WSAction = "push_finished"
-	ActionPing         WSAction = "ping"
 )
 
 type WSMessage struct {
@@ -138,8 +137,6 @@ func main() {
 					_ = c.WriteJSON(fiber.Map{"message": "session finished", "error": err})
 					_ = c.Close()
 					return
-				case ActionPing:
-					session.UpdateWriterPing()
 				default:
 					_ = c.WriteJSON(fiber.Map{"message": "invalid action"})
 				}

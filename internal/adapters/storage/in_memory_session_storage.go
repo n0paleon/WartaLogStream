@@ -77,16 +77,6 @@ func (s *InMemorySessionStorage) startWriterHeartbeat() {
 	}()
 }
 
-// stopInternal warning, this method is not using mutex to call, make sure the caller set mutex lock first before calling this method
-func (s *InMemorySessionStorage) stopInternal() {
-	if s.stopped {
-		return
-	}
-	s.stopped = true
-	s.stoppedAt = time.Now()
-	s.broadcast(ports.Event{Type: ports.EventStatus, Data: "Stopped"})
-}
-
 // UpdateWriterPing digunakan writer untuk menandai aktivitas.
 // Harus dipanggil oleh writer setiap kali ada aksi (PushLog, SetNote, dsb).
 func (s *InMemorySessionStorage) UpdateWriterPing() {
