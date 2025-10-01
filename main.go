@@ -50,76 +50,101 @@ func main() {
 	// create session via HTTP
 	app.Post("/session", func(ctx *fiber.Ctx) error {
 		session := storage.NewInMemoryStorage(MaxLogEntries)
-		token := storage.GenerateToken() // generate random token
-		session.SetToken(token)
 		sessionRegistry.Add(session)
 
 		return ctx.JSON(fiber.Map{
 			"session_id": session.GetID(),
-			"token":      token,
+			"token":      session.GetToken(),
 		})
 	})
 
 	// WS writer
-	app.Use("/session/:session_id/ws/writer", websocket.New(func(c *websocket.Conn) {
-		sessionId := c.Params("session_id")
-		session, ok := sessionRegistry.Get(sessionId)
-		if !ok {
-			_ = c.WriteJSON(fiber.Map{"message": "invalid session id"})
-			_ = c.Close()
-			return
-		}
-
-		var lastPing int64 = time.Now().UnixNano()
-
-		_ = c.SetReadDeadline(time.Now().Add(PingTimeout))
-		c.SetPongHandler(func(string) error {
-			_ = c.SetReadDeadline(time.Now().Add(PingTimeout))
-			return nil
-		})
-
-		// goroutine cek ping timeout
-		go func() {
-			ticker := time.NewTicker(PingTimeout / 2)
-			defer ticker.Stop()
-			for range ticker.C {
-				deadline := time.Now().Add(PingInterval)
-				if err := c.WriteControl(websocket.PingMessage, []byte{}, deadline); err != nil {
-					log.Println("ping failed:", err)
-					_ = c.Close()
-					return
-				}
+	app.Use("/session/:session_id/ws/writer",
+		func(c *fiber.Ctx) error {
+			token := c.Get("x-writer-token", "")
+			if token == "" {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"message": "token is required",
+				})
 			}
-		}()
 
-		for {
-			var msg WSMessage
-			if err := c.ReadJSON(&msg); err != nil {
-				return
+			sessionId := c.Params("session_id")
+			session, ok := sessionRegistry.Get(sessionId)
+			if !ok {
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+					"message": "session not found",
+				})
 			}
-			atomic.StoreInt64(&lastPing, time.Now().UnixNano())
 
-			switch msg.Action {
-			case ActionPushLog:
-				if err := session.PushLog(msg.Token, msg.Data); err != nil {
-					_ = c.WriteJSON(fiber.Map{"error": err.Error()})
-				}
-			case ActionSetNote:
-				if err := session.SetNote(msg.Token, msg.Data); err != nil {
-					_ = c.WriteJSON(fiber.Map{"error": err.Error()})
-				}
-			case ActionPushFinished:
-				err := session.Stop(msg.Token)
-				_ = c.WriteJSON(fiber.Map{"message": "session finished", "error": err})
+			if err := session.ValidateToken(token); err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"message": err.Error(),
+				})
+			}
+
+			return c.Next()
+		},
+		websocket.New(func(c *websocket.Conn) {
+			sessionId := c.Params("session_id")
+			session, ok := sessionRegistry.Get(sessionId)
+			if !ok {
+				_ = c.WriteJSON(fiber.Map{"message": "invalid session id"})
 				_ = c.Close()
 				return
-			case ActionPing:
-				session.UpdateWriterPing()
-			default:
-				_ = c.WriteJSON(fiber.Map{"message": "invalid action"})
 			}
-		}
-	}))
+
+			var lastPing int64 = time.Now().UnixNano()
+
+			_ = c.SetReadDeadline(time.Now().Add(PingTimeout))
+			c.SetPongHandler(func(string) error {
+				_ = c.SetReadDeadline(time.Now().Add(PingTimeout))
+				return nil
+			})
+
+			// goroutine cek ping timeout
+			go func() {
+				ticker := time.NewTicker(5 * time.Second)
+				defer ticker.Stop()
+				for range ticker.C {
+					deadline := time.Now().Add(PingInterval)
+					session.UpdateWriterPing()
+					if err := c.WriteControl(websocket.PingMessage, []byte{}, deadline); err != nil {
+						log.Println("ping failed:", err)
+						_ = session.Stop()
+						_ = c.Close()
+						return
+					}
+				}
+			}()
+
+			for {
+				var msg WSMessage
+				if err := c.ReadJSON(&msg); err != nil {
+					return
+				}
+				atomic.StoreInt64(&lastPing, time.Now().UnixNano())
+
+				switch msg.Action {
+				case ActionPushLog:
+					if err := session.PushLog(msg.Data); err != nil {
+						_ = c.WriteJSON(fiber.Map{"error": err.Error()})
+					}
+				case ActionSetNote:
+					if err := session.SetNote(msg.Data); err != nil {
+						_ = c.WriteJSON(fiber.Map{"error": err.Error()})
+					}
+				case ActionPushFinished:
+					err := session.Stop()
+					_ = c.WriteJSON(fiber.Map{"message": "session finished", "error": err})
+					_ = c.Close()
+					return
+				case ActionPing:
+					session.UpdateWriterPing()
+				default:
+					_ = c.WriteJSON(fiber.Map{"message": "invalid action"})
+				}
+			}
+		}))
 
 	// WS subscriber
 	app.Use("/session/:session_id/ws/subscriber", websocket.New(func(c *websocket.Conn) {
@@ -143,7 +168,7 @@ func main() {
 
 		// goroutine cek ping timeout
 		go func() {
-			ticker := time.NewTicker(PingTimeout / 2)
+			ticker := time.NewTicker(5 * time.Second)
 			defer ticker.Stop()
 			for range ticker.C {
 				deadline := time.Now().Add(PingInterval)

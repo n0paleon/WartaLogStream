@@ -92,24 +92,7 @@ term.focus();
 const noteColumn = document.getElementById('note-column');
 
 // koneksi WebSocket ke backend (route updated)
-const ws = new WebSocket(`wss://${window.location.host}/session/${sessionId}/ws/subscriber`);
-
-// Send PING every 100 seconds to keep connection alive
-let pingInterval = null;
-ws.addEventListener('open', () => {
-    pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "PING" }));
-        }
-    }, 100000);
-});
-
-ws.addEventListener('close', () => {
-    if (pingInterval) {
-        clearInterval(pingInterval);
-        pingInterval = null;
-    }
-});
+const ws = new WebSocket(`ws://localhost:3000/session/${sessionId}/ws/subscriber`);
 
 // terima event log / note / status / session_creation_time / session_stop_time
 ws.addEventListener('message', (evt) => {

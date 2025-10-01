@@ -31,6 +31,7 @@ type InMemorySessionStorage struct {
 func NewInMemoryStorage(maxEntries int) *InMemorySessionStorage {
 	session := &InMemorySessionStorage{
 		id:             ulid.Make().String(),
+		token:          GenerateToken(),
 		maxEntries:     maxEntries,
 		logs:           make([][]byte, 0, maxEntries),
 		noteLines:      make([]string, 0, 10),
@@ -52,6 +53,10 @@ func (s *InMemorySessionStorage) ValidateToken(token string) error {
 	return nil
 }
 
+func (s *InMemorySessionStorage) GetToken() string {
+	return s.token
+}
+
 func (s *InMemorySessionStorage) startWriterHeartbeat() {
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
@@ -64,7 +69,7 @@ func (s *InMemorySessionStorage) startWriterHeartbeat() {
 			}
 			if time.Since(s.lastWriterPing) > HeartBeatTimeout {
 				s.mu.Unlock() // required, do not remove
-				_ = s.Stop(s.token)
+				_ = s.Stop()
 				return
 			}
 			s.mu.Unlock()
@@ -90,12 +95,6 @@ func (s *InMemorySessionStorage) UpdateWriterPing() {
 	s.lastWriterPing = time.Now()
 }
 
-func (s *InMemorySessionStorage) SetToken(token string) {
-	s.mu.Lock()
-	s.token = token
-	s.mu.Unlock()
-}
-
 func (s *InMemorySessionStorage) GetID() string {
 	return s.id
 }
@@ -104,14 +103,11 @@ func (s *InMemorySessionStorage) GetExpiredAt() time.Time {
 	return s.expiredAt
 }
 
-func (s *InMemorySessionStorage) Stop(token string) error {
+func (s *InMemorySessionStorage) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopped {
 		return errors.New("session stopped")
-	}
-	if err := s.ValidateToken(token); err != nil {
-		return err
 	}
 
 	s.stopped = true
@@ -122,15 +118,11 @@ func (s *InMemorySessionStorage) Stop(token string) error {
 }
 
 // PushLog
-func (s *InMemorySessionStorage) PushLog(token string, data string) error {
+func (s *InMemorySessionStorage) PushLog(data string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopped {
 		return errors.New("session stopped")
-	}
-
-	if err := s.ValidateToken(token); err != nil {
-		return err
 	}
 
 	compressed, err := utils.Compress(data)
@@ -149,23 +141,17 @@ func (s *InMemorySessionStorage) PushLog(token string, data string) error {
 }
 
 // SetNote
-func (s *InMemorySessionStorage) SetNote(token string, data string) error {
+func (s *InMemorySessionStorage) SetNote(data string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopped {
 		return errors.New("session stopped")
 	}
 
-	if err := s.ValidateToken(token); err != nil {
-		return err
-	}
-
-	// potong panjang baris
 	if len(data) > 500 {
 		data = data[:500]
 	}
 
-	// simpan di noteLines (max 10)
 	if len(s.noteLines) == 10 {
 		s.noteLines = s.noteLines[1:]
 	}
@@ -182,7 +168,7 @@ func (s *InMemorySessionStorage) broadcast(evt ports.Event) {
 		select {
 		case ch <- evt:
 		default:
-			// skip kalau channel penuh
+			// skip
 		}
 	}
 }
@@ -191,7 +177,6 @@ func (s *InMemorySessionStorage) broadcast(evt ports.Event) {
 func (s *InMemorySessionStorage) SubscribeLog() chan ports.Event {
 	ch := make(chan ports.Event, 100)
 
-	// ambil snapshot log dan note
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.subscribers[ch] = struct{}{}
